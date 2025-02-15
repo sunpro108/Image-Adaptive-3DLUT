@@ -5,15 +5,16 @@ from torchvision.utils import save_image
 from torch.utils.data import DataLoader
 from torch.autograd import Variable
 
-from models import *
+from models_x import *
 from datasets import *
+from iharmony4_dataset import Iharmony4Dataset
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", type=int, default=145, help="epoch to load the saved checkpoint")
 parser.add_argument("--dataset_name", type=str, default="fiveK", help="name of the dataset")
-parser.add_argument("--input_color_space", type=str, default="sRGB", help="input color space: sRGB or XYZ")
-parser.add_argument("--model_dir", type=str, default="LUTs/paired/fiveK_480p_3LUT_sm_1e-4_mn_10", help="directory of saved models")
+parser.add_argument("--input_color_space", type=str, default="harmony", help="input color space: sRGB or XYZ")
+parser.add_argument("--model_dir", type=str, default="fiveK", help="directory of saved models")
 opt = parser.parse_args()
 opt.model_dir = opt.model_dir + '_' + opt.input_color_space
 
@@ -41,7 +42,7 @@ if cuda:
     criterion_pixelwise.cuda()
 
 # Load pretrained models
-LUTs = torch.load("saved_models/%s/LUTs_%d.pth" % (opt.model_dir, opt.epoch))
+LUTs = torch.load("pretrained_models/sRGB/LUTs.pth" )
 LUT0.load_state_dict(LUTs["0"])
 LUT1.load_state_dict(LUTs["1"])
 LUT2.load_state_dict(LUTs["2"])
@@ -52,7 +53,7 @@ LUT1.eval()
 LUT2.eval()
 #LUT3.eval()
 #LUT4.eval()
-classifier.load_state_dict(torch.load("saved_models/%s/classifier_%d.pth" % (opt.model_dir, opt.epoch)))
+classifier.load_state_dict(torch.load("pretrained_models/sRGB/classifier.pth"))
 classifier.eval()
 
 if opt.input_color_space == 'sRGB':
@@ -69,6 +70,14 @@ elif opt.input_color_space == 'XYZ':
         shuffle=False,
         num_workers=1,
     )
+elif opt.input_color_space == 'harmony':
+    dataloader = DataLoader(
+        Iharmony4Dataset('data/ihm256/Hday2night', is_for_train=False, resize=None),
+        batch_size=1,
+        shuffle=False,
+        num_workers=1,
+    )
+    opt.input_color_space = 'sRGB'
 
 
 def generator(img):
@@ -78,24 +87,24 @@ def generator(img):
     LUT = pred[0] * LUT0.LUT + pred[1] * LUT1.LUT + pred[2] * LUT2.LUT #+ pred[3] * LUT3.LUT + pred[4] * LUT4.LUT
 
     combine_A = img.new(img.size())
-    combine_A = trilinear_(LUT,img)
+    _, combine_A = trilinear_(LUT,img)
 
     return combine_A
 
 
 def visualize_result():
     """Saves a generated sample from the validation set"""
-    out_dir = "images/%s_%d" % (opt.model_dir, opt.epoch)
+    out_dir = "images" 
     os.makedirs(out_dir, exist_ok=True)
     for i, batch in enumerate(dataloader):
-        real_A = Variable(batch["A_input"].type(Tensor))
-        img_name = batch["input_name"]
+        real_A = Variable(batch["comp"].type(Tensor))
+        img_name = batch["img_path"]
         fake_B = generator(real_A)
+        real_B = Variable(batch["real"].type(Tensor))
 
-        #real_B = Variable(batch["A_exptC"].type(Tensor))
-        #img_sample = torch.cat((real_A.data, fake_B.data, real_B.data), -1)
-        #save_image(img_sample, "images/LUTs/paired/JPGsRGB8_to_JPGsRGB8_WB_original_5LUT/%s.png" % (img_name[0][:-4]), nrow=3, normalize=False)
-        save_image(fake_B, os.path.join(out_dir,"%s.png" % (img_name[0][:-4])), nrow=1, normalize=False)
+        img_sample = torch.cat((real_A.data, fake_B.data, real_B.data), -1)
+        save_image(img_sample, f"images/{i}.png")
+        # save_image(fake_B, os.path.join(out_dir,"%s.png" % (img_name[0][:-4])), nrow=1, normalize=False)
 
 def test_speed():
     t_list = []
